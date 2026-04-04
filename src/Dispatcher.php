@@ -75,6 +75,8 @@ final class Dispatcher
             $invoke($component);
         } catch (LiveValidationException $e) {
             return Response::validationFailed($e->result());
+        } catch (LiveRedirectException $e) {
+            return Response::json(['ok' => true, 'redirect' => $e->to]);
         }
 
         try {

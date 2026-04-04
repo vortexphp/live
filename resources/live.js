@@ -464,7 +464,65 @@
         return [];
     }
 
+    function captureLiveFocusMeta(root) {
+        var active = document.activeElement;
+        if (!active || !root.contains(active)) {
+            return null;
+        }
+        var tag = active.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+            return null;
+        }
+        var binding = getLiveModelBinding(active);
+        return {
+            tag: tag,
+            bindingProp: binding ? binding.prop : null,
+            id: active.id || '',
+            selStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+            selEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
+        };
+    }
+
+    function restoreLiveFocus(next, meta) {
+        if (!meta || !next || !next.querySelector) {
+            return;
+        }
+        var el = null;
+        if (meta.bindingProp) {
+            var p = meta.bindingProp.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            el = next.querySelector(
+                '[live\\:model\\.local="' +
+                    p +
+                    '"],[live\\:model\\.live="' +
+                    p +
+                    '"],[live\\:model\\.lazy="' +
+                    p +
+                    '"]',
+            );
+        }
+        if (!el && meta.id) {
+            var cand = document.getElementById(meta.id);
+            if (cand && next.contains(cand)) {
+                el = cand;
+            }
+        }
+        if (!el || el.tagName !== meta.tag) {
+            return;
+        }
+        el.focus();
+        if (
+            meta.selStart != null &&
+            meta.selEnd != null &&
+            typeof el.setSelectionRange === 'function'
+        ) {
+            try {
+                el.setSelectionRange(meta.selStart, meta.selEnd);
+            } catch (e) {}
+        }
+    }
+
     function replaceRoot(root, html) {
+        var focusMeta = captureLiveFocusMeta(root);
         var template = document.createElement('template');
         template.innerHTML = html.trim();
         var next = template.content.firstElementChild;
@@ -472,6 +530,7 @@
             root.parentNode.replaceChild(next, root);
             expandLiveScopesIn(next);
             initLiveBindings(next);
+            restoreLiveFocus(next, focusMeta);
         }
     }
 
@@ -541,6 +600,10 @@
                 }
                 if (!data || typeof data !== 'object') {
                     showLiveServerError(root, '');
+                    return;
+                }
+                if (data.ok === true && typeof data.redirect === 'string' && data.redirect !== '') {
+                    window.location.assign(data.redirect);
                     return;
                 }
                 if (data.ok === true && typeof data.html === 'string') {
