@@ -21,7 +21,8 @@ final class Dispatcher
         $snapshotRaw = $body['snapshot'] ?? null;
         $action = $body['action'] ?? null;
         $args = $body['args'] ?? [];
-        if (! is_string($snapshotRaw) || $snapshotRaw === '' || ! is_string($action) || $action === '' || ! is_array($args)) {
+        $merge = $body['merge'] ?? [];
+        if (! is_string($snapshotRaw) || $snapshotRaw === '' || ! is_string($action) || $action === '' || ! is_array($args) || ! is_array($merge)) {
             return Response::json(['ok' => false, 'error' => 'invalid_request'], 422);
         }
 
@@ -38,6 +39,9 @@ final class Dispatcher
             return Response::json(['ok' => false, 'error' => 'component_not_allowed'], 422);
         }
 
+        /** @var class-string<Component> $class */
+        $state = FormStateMerge::apply($class, $state, $merge);
+
         /** @var Component $component */
         $component = new $class();
         $component->hydrate($state);
@@ -47,7 +51,11 @@ final class Dispatcher
             return Response::json(['ok' => false, 'error' => 'invalid_action'], 422);
         }
 
-        $invoke($component);
+        try {
+            $invoke($component);
+        } catch (LiveValidationException $e) {
+            return Response::validationFailed($e->result());
+        }
 
         try {
             $html = LiveHtml::renderAfterUpdate($component);

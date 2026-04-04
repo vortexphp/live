@@ -6,6 +6,7 @@ namespace Vortex\Live;
 
 use ReflectionClass;
 use ReflectionProperty;
+use Vortex\Validation\Validator;
 
 abstract class Component
 {
@@ -78,10 +79,28 @@ abstract class Component
     final public function dehydrate(): array
     {
         $this->dehydrating();
-        $out = $this->extractPublicState();
+        $out = $this->collectPublicProperties();
         $this->dehydrated();
 
         return $out;
+    }
+
+    /**
+     * Run {@see Validator::make()} on current public properties (no dehydrate hooks). On failure throws {@see LiveValidationException}.
+     *
+     * @param array<string, string|\Vortex\Validation\Rule> $rules
+     * @param array<string, string>                         $messages
+     * @param array<string, string>                         $attributes
+     */
+    protected final function validate(
+        array $rules,
+        array $messages = [],
+        array $attributes = [],
+    ): void {
+        $result = Validator::make($this->collectPublicProperties(), $rules, $messages, $attributes);
+        if ($result->failed()) {
+            throw new LiveValidationException($result);
+        }
     }
 
     /**
@@ -119,7 +138,10 @@ abstract class Component
     /**
      * @return array<string, mixed>
      */
-    private function extractPublicState(): array
+    /**
+     * @return array<string, mixed>
+     */
+    private function collectPublicProperties(): array
     {
         $ref = new ReflectionClass($this);
         $out = [];

@@ -10,10 +10,10 @@ Ordered by impact. Items are proposals, not commitments.
 - Twig `live_mount()`, vanilla `resources/live.js`, lifecycle: `mount`, `hydrating` / `hydrated`, `updating` / `updated`, `dehydrate` + `dehydrating` / `dehydrated`, `render` / `rendered`.
 - Single-pass `dehydrate` for snapshot + view data.
 - **Tests** — PHPUnit in package: `Snapshot` round-trip + wrong `APP_KEY` rejects token (`composer test` in `live/`).
+- **Validation** — `Component::validate()` + `LiveValidationException`; dispatcher responds with `Response::validationFailed()` (422, `errors`); `live.js` maps `errors` to `[live-error="field"]` nodes.
+- **Forms** — `<form live:submit="method">` serializes named controls into JSON `merge`; `FormStateMerge` applies typed values to snapshot state before `hydrate()`, then the action runs (for file inputs see roadmap).
 
 ## Near term
-
-- **Validation** — return 422 + field errors from actions or a dedicated validate step; surface errors in HTML or JSON for JS to show.
 - **Tests** — expand: `Dispatcher` + allowlist (bootstrapped app), lifecycle order with a stub component.
 - **Docs** — install steps (route, config, Twig extension, sync JS), security notes, lifecycle table.
 - **Redirect / non-HTML responses** — e.g. action returns `Response::redirect()`; JSON envelope signals full navigation or `Location` header.
