@@ -14,8 +14,8 @@ Ordered by impact. Items are proposals, not commitments.
 | `wire:model` lazy / blur | `live:model.lazy` |
 | Local / `entangle` / draft UI | `live:model.local` + DOM merge on next action, or never (pure client) |
 | `x-model` / `x-data` text state | `live:model.local` + optional `live-display="prop"` |
-| `x-data` + `x-for="(v,k) in obj"` | **`data-live-scope`** or **`live:scope`** (JSON) + **`<template data-live-for-each="path">`**; **`<span data-live-slot="key|value|index">`** in the template. Objects iterate key order; arrays iterate indices. Expansion runs at boot and after each root swap; ad-hoc re-run from JS is roadmap. |
-| `x-for` + server round-trip lists | Flat snapshot props + Twig `{% for %}`, `data-live-args`, or matching flat `live:model.local` keys |
+| `x-data` + `x-for="(v,k) in obj"` | **`live:scope`** (JSON) + **`<template live:for-each="path">`**; **`live:slot="key|value|index"`** on nodes inside the template. Objects iterate key order; arrays iterate indices. Expansion runs at boot and after each root swap; ad-hoc re-run from JS is roadmap. |
+| `x-for` + server round-trip lists | Flat snapshot props + Twig `{% for %}`, `live:args`, or matching flat `live:model.local` keys |
 | Imperative Alpine stores | **Roadmap:** imperative `live:model.local` batch helpers on the same island |
 | `x-on:click` that only touches JS | Small page/partial script today; general **`.local` actions** on `live:click` / `live:submit` are roadmap |
 
@@ -29,7 +29,7 @@ Ordered by impact. Items are proposals, not commitments.
   - **Lazy** — talk to the backend **later** (commit, blur, debounce window, explicit “flush”), not on every micro-interaction.
   Today, **`live:model.local` / `.live` / `.lazy`** are the first place this is fully expressed in markup; **`live:click`** effectively behaves like **live** (always POSTs on click). Generalizing `.local` / `.live` / `.lazy` (or equivalent) for **clicks, submits, and other actions** is roadmap work below.
 - **Markup syntax:** root `[live-root]` + `live-state` / `live-url` / `live-csrf`; actions **`live:click="method"`** (colon attrs, same spirit as `wire:click`).
-- **`live:args`** — optional JSON array on the action node; **`data-live-args`** is the same payload as a standard HTML data attribute; **`data-live-arg`** is a single JSON value and becomes a one-element `args` array (good for `loop.index0` in foreach). POST `args` → `ReflectionMethod::invokeArgs` (arity must match; no variadic).
+- **`live:args`** — optional JSON array on the action node; single value: `live:args='[0]'` (good for `key` in foreach). POST `args` → `ReflectionMethod::invokeArgs` (arity must match; no variadic).
 - Signed snapshots (`Crypt`), CSRF on `/live/message`, config allowlist (`live.components`).
 - Twig `live_mount()`, vanilla `resources/live.js`, lifecycle: `mount`, `hydrating` / `hydrated`, `updating` / `updated`, `dehydrate` + `dehydrating` / `dehydrated`, `render` / `rendered`.
 - Single-pass `dehydrate` for snapshot + view data.
@@ -38,7 +38,7 @@ Ordered by impact. Items are proposals, not commitments.
 - **Forms** — `<form live:submit="method">` serializes named controls into JSON `merge`; `FormStateMerge` applies typed values to snapshot state before `hydrate()`, then the action runs (for file inputs see roadmap).
 - **`live:model.*` (first-class three-way bindings)** — Same semantics as the rule above, for controls only (see **Near term** for clicks/submits):
   - **`live:model.local`** — no auto HTTP while editing; value merges on the next action from the DOM. Optional **`live-display="prop"`** sibling nodes in the same `[live-root]` get their `textContent` updated client-side as the local control changes (no request).
-  - **`live:scope` / `data-live-scope`** — JSON on a container; **`<template data-live-for-each="dot.path">`** expands **object** keys or **array** elements into siblings; **`data-live-slot="key|value|index"`** fills text (**Alpine-like `x-for (value, key)`**). Runs on `document.body` at boot and after each root swap before **`initLiveBindings`** (see local examples).
+  - **`live:scope`** — JSON on a container; **`<template live:for-each="dot.path">`** expands **object** keys or **array** elements into siblings; **`live:slot="key|value|index"`** fills text (**Alpine-like `x-for (value, key)`**). Runs on `document.body` at boot and after each root swap before **`initLiveBindings`** (see local examples).
   - **`live:model.live`** — debounced `input` / `change` → `sync: true` + `merge` → re-render, no component action.
   - **`live:model.lazy`** — `change` / commit → same sync path as `live`, different timing.
   - Model **lazy** is about binding latency; **Medium term** “lazy load” for components is unrelated.

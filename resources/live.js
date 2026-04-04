@@ -133,6 +133,50 @@
         }
     }
 
+    var LIVE_SERVER_ERR_ID = 'live-server-error-banner';
+
+    function clearLiveServerError(root) {
+        if (!root || !root.querySelector) {
+            return;
+        }
+        var wrap = root.querySelector('#' + LIVE_SERVER_ERR_ID);
+        if (wrap) {
+            wrap.parentNode.removeChild(wrap);
+        }
+    }
+
+    function friendlyLiveServerMessage(raw) {
+        if (raw == null) {
+            return '';
+        }
+        var s = String(raw);
+        if (/SQLSTATE|PDOException|Integrity constraint|syntax error/i.test(s)) {
+            return 'Could not save your changes. Please try again.';
+        }
+        if (s.length > 280) {
+            return s.slice(0, 277) + '…';
+        }
+        return s;
+    }
+
+    function showLiveServerError(root, rawMessage) {
+        if (!root || !root.querySelector) {
+            return;
+        }
+        clearLiveServerError(root);
+        var text = friendlyLiveServerMessage(rawMessage);
+        if (!text) {
+            text = 'Something went wrong. Please try again.';
+        }
+        var wrap = document.createElement('div');
+        wrap.id = LIVE_SERVER_ERR_ID;
+        wrap.setAttribute('role', 'alert');
+        wrap.className =
+            'mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200';
+        wrap.textContent = text;
+        root.insertBefore(wrap, root.firstChild);
+    }
+
     // --- Local mirrors (live-display) ----------------------------------------
 
     function formatLocalDisplayValue(v) {
@@ -469,13 +513,34 @@
             credentials: 'same-origin',
         })
             .then(function (res) {
-                return res.json().then(function (data) {
+                return res.text().then(function (text) {
+                    var data = null;
+                    if (text) {
+                        try {
+                            data = JSON.parse(text);
+                        } catch (e) {
+                            data = {
+                                ok: false,
+                                error: 'invalid_response',
+                                message: text.length > 200 ? text.slice(0, 200) + '…' : text,
+                            };
+                        }
+                    }
                     return { res: res, data: data };
                 });
             })
             .then(function (result) {
                 var data = result.data;
+                var res = result.res;
+                if (!res.ok && (!data || typeof data !== 'object')) {
+                    showLiveServerError(
+                        root,
+                        'Request failed (' + res.status + '). Please try again.',
+                    );
+                    return;
+                }
                 if (!data || typeof data !== 'object') {
+                    showLiveServerError(root, '');
                     return;
                 }
                 if (data.ok === true && typeof data.html === 'string') {
@@ -483,10 +548,24 @@
                     return;
                 }
                 if (data.error === 'validation_failed' && data.errors && typeof data.errors === 'object') {
+                    clearLiveServerError(root);
                     applyLiveErrors(root, data.errors);
+                    return;
+                }
+                if (data.ok === false) {
+                    var msg =
+                        typeof data.message === 'string' && data.message !== ''
+                            ? data.message
+                            : typeof data.error === 'string'
+                              ? data.error
+                              : '';
+                    showLiveServerError(root, msg);
+                    return;
                 }
             })
-            .catch(function () {});
+            .catch(function () {
+                showLiveServerError(root, 'Network error. Check your connection and try again.');
+            });
     }
 
     // --- Model binders ---------------------------------------------------------
