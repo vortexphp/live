@@ -19,10 +19,20 @@ final class Dispatcher
         }
 
         $snapshotRaw = $body['snapshot'] ?? null;
-        $action = $body['action'] ?? null;
+        /** @var mixed */
+        $actionRaw = $body['action'] ?? '';
+        $action = is_string($actionRaw) ? $actionRaw : '';
         $args = $body['args'] ?? [];
         $merge = $body['merge'] ?? [];
-        if (! is_string($snapshotRaw) || $snapshotRaw === '' || ! is_string($action) || $action === '' || ! is_array($args) || ! is_array($merge)) {
+        $sync = ($body['sync'] ?? false) === true;
+
+        if (! is_string($snapshotRaw) || $snapshotRaw === '' || ! is_array($args) || ! is_array($merge)) {
+            return Response::json(['ok' => false, 'error' => 'invalid_request'], 422);
+        }
+
+        if ($sync) {
+            $action = '';
+        } elseif ($action === '') {
             return Response::json(['ok' => false, 'error' => 'invalid_request'], 422);
         }
 
@@ -45,6 +55,16 @@ final class Dispatcher
         /** @var Component $component */
         $component = new $class();
         $component->hydrate($state);
+
+        if ($sync) {
+            try {
+                $html = LiveHtml::renderAfterUpdate($component);
+            } catch (\Throwable) {
+                return Response::json(['ok' => false, 'error' => 'render_failed'], 500);
+            }
+
+            return Response::json(['ok' => true, 'html' => $html]);
+        }
 
         $invoke = $this->resolveAction($class, $action, $args);
         if ($invoke === null) {
