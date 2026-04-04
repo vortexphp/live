@@ -6,6 +6,7 @@ namespace Vortex\Live;
 
 use JsonException;
 use ReflectionClass;
+use ReflectionMethod;
 use Vortex\Http\Csrf;
 use Vortex\Http\Response;
 
@@ -19,7 +20,8 @@ final class Dispatcher
 
         $snapshotRaw = $body['snapshot'] ?? null;
         $action = $body['action'] ?? null;
-        if (! is_string($snapshotRaw) || $snapshotRaw === '' || ! is_string($action) || $action === '') {
+        $args = $body['args'] ?? [];
+        if (! is_string($snapshotRaw) || $snapshotRaw === '' || ! is_string($action) || $action === '' || ! is_array($args)) {
             return Response::json(['ok' => false, 'error' => 'invalid_request'], 422);
         }
 
@@ -40,7 +42,7 @@ final class Dispatcher
         $component = new $class();
         $component->hydrate($state);
 
-        $invoke = $this->resolveAction($class, $action);
+        $invoke = $this->resolveAction($class, $action, $args);
         if ($invoke === null) {
             return Response::json(['ok' => false, 'error' => 'invalid_action'], 422);
         }
@@ -58,9 +60,10 @@ final class Dispatcher
 
     /**
      * @param class-string<Component> $class
+     * @param list<mixed> $args
      * @return (callable(Component): void)|null
      */
-    private function resolveAction(string $class, string $action): ?callable
+    private function resolveAction(string $class, string $action, array $args): ?callable
     {
         if (! preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $action)) {
             return null;
@@ -84,13 +87,28 @@ final class Dispatcher
             return null;
         }
 
-        if ($method->getNumberOfRequiredParameters() > 0) {
+        if (! $this->argsMatchSignature($method, $args)) {
             return null;
         }
 
-        return static function (Component $instance) use ($method): void {
-            $name = $method->getName();
-            $instance->{$name}();
+        return static function (Component $instance) use ($method, $args): void {
+            $method->invokeArgs($instance, $args);
         };
+    }
+
+    /**
+     * @param list<mixed> $args
+     */
+    private function argsMatchSignature(ReflectionMethod $method, array $args): bool
+    {
+        if ($method->isVariadic()) {
+            return false;
+        }
+
+        $required = $method->getNumberOfRequiredParameters();
+        $total = $method->getNumberOfParameters();
+        $n = count($args);
+
+        return $n >= $required && $n <= $total;
     }
 }

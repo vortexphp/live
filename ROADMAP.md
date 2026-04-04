@@ -5,16 +5,17 @@ Ordered by impact. Items are proposals, not commitments.
 ## Done (baseline)
 
 - **Markup syntax:** root `[live-root]` + `live-state` / `live-url` / `live-csrf`; actions **`live:click="method"`** (colon attrs, same spirit as `wire:click`).
+- **`live:args`** — optional JSON array on the action node; POST body `args` → `ReflectionMethod::invokeArgs` (arity must match parameters; no variadic).
 - Signed snapshots (`Crypt`), CSRF on `/live/message`, config allowlist (`live.components`).
 - Twig `live_mount()`, vanilla `resources/live.js`, lifecycle: `mount`, `hydrating` / `hydrated`, `updating` / `updated`, `dehydrate` + `dehydrating` / `dehydrated`, `render` / `rendered`.
 - Single-pass `dehydrate` for snapshot + view data.
+- **Tests** — PHPUnit in package: `Snapshot` round-trip + wrong `APP_KEY` rejects token (`composer test` in `live/`).
 
 ## Near term
 
 - **Validation** — return 422 + field errors from actions or a dedicated validate step; surface errors in HTML or JSON for JS to show.
-- **Tests** — PHPUnit: `Snapshot` round-trip, `Dispatcher` allowlist + bad MAC, lifecycle call order with a stub component.
+- **Tests** — expand: `Dispatcher` + allowlist (bootstrapped app), lifecycle order with a stub component.
 - **Docs** — install steps (route, config, Twig extension, sync JS), security notes, lifecycle table.
-- **`args` in request body** — map JSON `args` to action parameters (typed or validated) instead of zero-arg-only.
 - **Redirect / non-HTML responses** — e.g. action returns `Response::redirect()`; JSON envelope signals full navigation or `Location` header.
 
 ## Medium term

@@ -11,6 +11,7 @@
      *
      * Actions (colon requires CSS escape in selectors):
      *   live:click="methodName"
+     *   live:args='[1,"ok"]'  optional JSON array of positional arguments
      */
     var CLICK = '[live\\:click]';
 
@@ -36,6 +37,20 @@
             return;
         }
 
+        var argsRaw = actionEl.getAttribute('live:args');
+        var args = [];
+        if (argsRaw !== null && argsRaw !== '') {
+            try {
+                var parsed = JSON.parse(argsRaw);
+                if (!Array.isArray(parsed)) {
+                    return;
+                }
+                args = parsed;
+            } catch (e) {
+                return;
+            }
+        }
+
         event.preventDefault();
 
         fetch(url, {
@@ -48,7 +63,7 @@
                 _csrf: csrf,
                 snapshot: state,
                 action: method,
-                args: [],
+                args: args,
             }),
             credentials: 'same-origin',
         })
