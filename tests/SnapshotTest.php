@@ -18,6 +18,20 @@ final class SnapshotTest extends TestCase
         self::assertSame(['count' => 3, 'tag' => 'x'], $decoded['state']);
     }
 
+    public function testEncodeSortsStateKeysRecursivelyForStableSignatures(): void
+    {
+        $token = Snapshot::encode('App\\Demo\\Widget', [
+            'z' => 1,
+            'a' => ['n' => 2, 'm' => 3],
+        ]);
+        $decoded = Snapshot::decode($token);
+
+        self::assertSame([
+            'a' => ['m' => 3, 'n' => 2],
+            'z' => 1,
+        ], $decoded['state']);
+    }
+
     public function testDifferentAppKeyFailsVerification(): void
     {
         $token = Snapshot::encode('App\\Demo\\Widget', ['n' => 1]);

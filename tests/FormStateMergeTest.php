@@ -45,4 +45,25 @@ final class FormStateMergeTest extends TestCase
         self::assertArrayHasKey('opt', $out);
         self::assertNull($out['opt']);
     }
+
+    public function testSkipsReadonlyPublicProperties(): void
+    {
+        $stub = new class extends Component {
+            public readonly string $ro;
+
+            public function __construct()
+            {
+                $this->ro = 'fixed';
+            }
+
+            public function view(): string
+            {
+                return '';
+            }
+        };
+
+        $out = FormStateMerge::apply($stub::class, ['ro' => 'fixed'], ['ro' => 'hijack']);
+
+        self::assertSame(['ro' => 'fixed'], $out);
+    }
 }
