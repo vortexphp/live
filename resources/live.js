@@ -8,7 +8,7 @@
  *   Controls               — read/write form controls, FormData → merge
  *   Context                — [live-root], snapshot URL + CSRF
  *   Binding meta           — live:model.* detection, merge from DOM
- *   Validation UI          — live-error nodes
+ *   Validation UI          — live-error nodes; live:error-class on inputs
  *   Local mirrors          — live-display text sync
  *   Conditional visibility  — live:show / live:hide from bound prop truthiness
  *   Scope templates        — live:scope + <template live:for-each>
@@ -119,7 +119,66 @@
 
     // --- Validation UI --------------------------------------------------------
 
+    function findLiveModelControlsForField(root, field) {
+        if (!root || !field || !root.querySelectorAll) {
+            return [];
+        }
+        var p = String(field).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        var sel =
+            '[live\\:model\\.local="' +
+            p +
+            '"],[live\\:model\\.live="' +
+            p +
+            '"],[live\\:model\\.lazy="' +
+            p +
+            '"]';
+        var nodes = root.querySelectorAll(sel);
+        var out = [];
+        for (var i = 0; i < nodes.length; i++) {
+            var n = nodes[i];
+            var tag = n.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+                out.push(n);
+            }
+        }
+        return out;
+    }
+
+    function liveErrorClassTokens(el) {
+        var raw = el.getAttribute('live:error-class');
+        if (raw == null || String(raw).trim() === '') {
+            return [];
+        }
+        return String(raw)
+            .trim()
+            .split(/\s+/)
+            .filter(function (t) {
+                return t !== '';
+            });
+    }
+
+    function applyLiveErrorFieldState(root, field, hasError) {
+        var controls = findLiveModelControlsForField(root, field);
+        for (var i = 0; i < controls.length; i++) {
+            var c = controls[i];
+            var tokens = liveErrorClassTokens(c);
+            for (var t = 0; t < tokens.length; t++) {
+                if (hasError) {
+                    c.classList.add(tokens[t]);
+                } else {
+                    c.classList.remove(tokens[t]);
+                }
+            }
+            if (hasError) {
+                c.setAttribute('aria-invalid', 'true');
+            } else {
+                c.removeAttribute('aria-invalid');
+            }
+        }
+    }
+
     function applyLiveErrors(root, errors) {
+        errors = errors && typeof errors === 'object' ? errors : {};
         var nodes = root.querySelectorAll('[live-error]');
         for (var i = 0; i < nodes.length; i++) {
             var el = nodes[i];
@@ -130,6 +189,8 @@
             }
             var msg = errors[field];
             el.textContent = msg ? msg : '';
+            var bad = !!(msg && String(msg).trim() !== '');
+            applyLiveErrorFieldState(root, field, bad);
         }
     }
 
