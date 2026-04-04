@@ -57,6 +57,7 @@ final class Dispatcher
         $component->hydrate($state);
 
         if ($sync) {
+            $component->resetTransientStateAfterLiveSync();
             try {
                 $html = LiveHtml::renderAfterUpdate($component);
             } catch (\Throwable) {

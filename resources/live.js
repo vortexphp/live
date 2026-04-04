@@ -12,9 +12,9 @@
  *   Local mirrors          — live-display text sync
  *   Conditional visibility  — live:show / live:hide from bound prop truthiness
  *   Scope templates        — live:scope + <template live:for-each>
- *   Transport              — parseArgs, POST /live/message, replaceRoot
+ *   Transport              — parseArgs, POST /live/message, replaceRoot; loading (live:panel + live:busy-class)
  *   Model binders          — bindOneModel, initLiveBindings
- *   Document events        — delegated click + submit
+ *   Document events        — delegated click (+ live:exit) + submit
  *   Boot                   — DOMContentLoaded
  */
 
@@ -32,6 +32,17 @@
     };
 
     var templateUid = 0;
+
+    function prefersReducedMotion() {
+        try {
+            return (
+                window.matchMedia &&
+                window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            );
+        } catch (e) {
+            return false;
+        }
+    }
 
     // --- Controls -------------------------------------------------------------
 
@@ -595,9 +606,92 @@
         }
     }
 
+    var LIVE_LOADING_SURFACE_CLASS = 'live-loading-surface';
+
+    function liveLoadingSurfaceEl(root) {
+        if (!root || !root.querySelector) {
+            return null;
+        }
+        var marked = root.querySelector('[live\\:panel]');
+        if (marked && marked.nodeType === 1) {
+            return marked;
+        }
+        if (root.firstElementChild && root.firstElementChild.nodeType === 1) {
+            return root.firstElementChild;
+        }
+        return null;
+    }
+
+    function adjustLiveRootLoading(root, delta) {
+        if (!root || !root.setAttribute || delta === 0) {
+            return;
+        }
+        var cur = parseInt(root.getAttribute('live:requests') || '0', 10);
+        if (isNaN(cur)) {
+            cur = 0;
+        }
+        cur = Math.max(0, cur + delta);
+        root.setAttribute('live:requests', String(cur));
+        var surface = liveLoadingSurfaceEl(root);
+        if (cur > 0) {
+            root.setAttribute('aria-busy', 'true');
+            if (surface && surface.classList) {
+                surface.classList.add(LIVE_LOADING_SURFACE_CLASS);
+            }
+        } else {
+            root.removeAttribute('aria-busy');
+            root.removeAttribute('live:requests');
+            if (surface && surface.classList) {
+                surface.classList.remove(LIVE_LOADING_SURFACE_CLASS);
+            }
+        }
+    }
+
+    function readLiveBusyFromElement(el) {
+        if (!el || !el.getAttribute) {
+            return { busyEl: null, busyClass: '' };
+        }
+        var cls = el.getAttribute('live:busy-class');
+        if (cls == null || String(cls).trim() === '') {
+            return { busyEl: null, busyClass: '' };
+        }
+        return { busyEl: el, busyClass: String(cls).trim() };
+    }
+
+    function readLiveBusyFromForm(form, submitEvent) {
+        if (!form || !form.getAttribute) {
+            return { busyEl: null, busyClass: '' };
+        }
+        var cls = form.getAttribute('live:busy-class');
+        if (cls == null || String(cls).trim() === '') {
+            return { busyEl: null, busyClass: '' };
+        }
+        var busyClass = String(cls).trim();
+        var submitter =
+            submitEvent &&
+            typeof submitEvent.submitter !== 'undefined' &&
+            submitEvent.submitter
+                ? submitEvent.submitter
+                : null;
+        var busyEl = submitter && submitter.form === form ? submitter : null;
+        if (!busyEl) {
+            busyEl = form.querySelector('button[type="submit"]');
+        }
+        if (!busyEl) {
+            busyEl = form.querySelector('[type="submit"]');
+        }
+        return { busyEl: busyEl, busyClass: busyClass };
+    }
+
     function postLive(root, action, args, merge, options) {
         options = options || {};
         var sync = options.sync === true;
+        var skipLoading = options.skipLoading === true || sync === true;
+        var busyEl = options.busyEl || null;
+        var busyClass =
+            options.busyClass && String(options.busyClass).trim() !== ''
+                ? String(options.busyClass).trim()
+                : '';
         var ctx = readLiveContext(root);
         if (!ctx.state || !ctx.url || !ctx.csrf) {
             return;
@@ -614,6 +708,25 @@
             mergePayload = userMerge;
         } else {
             mergePayload = mergeModelFieldsFromRoot(root, userMerge);
+        }
+
+        if (!skipLoading) {
+            adjustLiveRootLoading(root, 1);
+        }
+        if (busyEl && busyClass) {
+            busyEl.classList.add.apply(busyEl.classList, busyClass.split(/\s+/).filter(Boolean));
+        }
+
+        function finishRequest() {
+            if (!skipLoading) {
+                adjustLiveRootLoading(root, -1);
+            }
+            if (busyEl && busyClass && busyEl.classList) {
+                var tokens = busyClass.split(/\s+/).filter(Boolean);
+                for (var bi = 0; bi < tokens.length; bi++) {
+                    busyEl.classList.remove(tokens[bi]);
+                }
+            }
         }
 
         fetch(ctx.url, {
@@ -689,7 +802,8 @@
             })
             .catch(function () {
                 showLiveServerError(root, 'Network error. Check your connection and try again.');
-            });
+            })
+            .finally(finishRequest);
     }
 
     // --- Model binders ---------------------------------------------------------
@@ -809,7 +923,47 @@
             return;
         }
         event.preventDefault();
-        postLive(root, method, args, {});
+
+        var clickBusy = readLiveBusyFromElement(actionEl);
+
+        var exitSelRaw = actionEl.getAttribute('live:exit');
+        if (exitSelRaw != null && String(exitSelRaw).trim() !== '') {
+            var exitNode = actionEl.closest(String(exitSelRaw).trim());
+            if (exitNode && root.contains(exitNode)) {
+                if (prefersReducedMotion()) {
+                    postLive(root, method, args, {}, clickBusy);
+                    return;
+                }
+                var exitClassRaw = actionEl.getAttribute('live:exit-class');
+                var exitClass =
+                    exitClassRaw != null && String(exitClassRaw).trim() !== ''
+                        ? String(exitClassRaw).trim()
+                        : 'live-exit-pending';
+                exitNode.classList.add(exitClass);
+                var finished = false;
+                var maxWaitMs = 500;
+                function done() {
+                    if (finished) {
+                        return;
+                    }
+                    finished = true;
+                    window.clearTimeout(failSafe);
+                    exitNode.removeEventListener('animationend', onAnimEnd);
+                    postLive(root, method, args, {}, clickBusy);
+                }
+                function onAnimEnd(e) {
+                    if (e.target !== exitNode) {
+                        return;
+                    }
+                    done();
+                }
+                var failSafe = window.setTimeout(done, maxWaitMs);
+                exitNode.addEventListener('animationend', onAnimEnd);
+                return;
+            }
+        }
+
+        postLive(root, method, args, {}, clickBusy);
     }
 
     function handleLiveDocumentSubmit(event) {
@@ -827,7 +981,8 @@
         }
         event.preventDefault();
         var merge = Object.assign({}, mergeFromBoundInside(form), formDataToMerge(form));
-        postLive(root, method, [], merge);
+        var formBusy = readLiveBusyFromForm(form, event);
+        postLive(root, method, [], merge, formBusy);
     }
 
     document.addEventListener('click', handleLiveDocumentClick);

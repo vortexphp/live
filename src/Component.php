@@ -43,6 +43,12 @@ abstract class Component
     protected function hydrated(): void {}
 
     /**
+     * Called only for Live `sync: true` requests (e.g. live:model.live/lazy) before re-render.
+     * Use to drop one-shot UI flags that should not persist across debounced syncs.
+     */
+    public function resetTransientStateAfterLiveSync(): void {}
+
+    /**
      * Before a public property from the snapshot is written. {@see $newValue} is the incoming value.
      */
     protected function updating(string $name, mixed $newValue): void {}
