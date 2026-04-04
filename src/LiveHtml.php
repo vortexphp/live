@@ -83,7 +83,7 @@ final class LiveHtml
         $csrf = htmlspecialchars(Csrf::token(), ENT_QUOTES, 'UTF-8');
 
         return <<<HTML
-<div class="live-root" data-live-root data-live-snapshot="{$tokenAttr}" data-live-endpoint="{$endpoint}" data-live-csrf="{$csrf}">
+<div class="live-root" live-root live-state="{$tokenAttr}" live-url="{$endpoint}" live-csrf="{$csrf}">
 {$innerHtml}
 </div>
 HTML;

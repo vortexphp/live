@@ -1,31 +1,44 @@
 (function () {
     'use strict';
 
+    /**
+     * Live syntax (Livewire-style colon actions)
+     *
+     * Root [live-root]:
+     *   live-state   signed snapshot
+     *   live-url     POST endpoint
+     *   live-csrf    token
+     *
+     * Actions (colon requires CSS escape in selectors):
+     *   live:click="methodName"
+     */
+    var CLICK = '[live\\:click]';
+
     document.addEventListener('click', function (event) {
         var target = event.target;
         if (!target || !target.closest) {
             return;
         }
-        var actionEl = target.closest('[data-live-action]');
+        var actionEl = target.closest(CLICK);
         if (!actionEl) {
             return;
         }
-        var root = actionEl.closest('[data-live-root]');
+        var root = actionEl.closest('[live-root]');
         if (!root) {
             return;
         }
 
-        var snapshot = root.getAttribute('data-live-snapshot');
-        var endpoint = root.getAttribute('data-live-endpoint');
-        var csrf = root.getAttribute('data-live-csrf');
-        var action = actionEl.getAttribute('data-live-action');
-        if (!snapshot || !endpoint || !csrf || !action) {
+        var state = root.getAttribute('live-state');
+        var url = root.getAttribute('live-url');
+        var csrf = root.getAttribute('live-csrf');
+        var method = actionEl.getAttribute('live:click');
+        if (!state || !url || !csrf || !method) {
             return;
         }
 
         event.preventDefault();
 
-        fetch(endpoint, {
+        fetch(url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -33,8 +46,8 @@
             },
             body: JSON.stringify({
                 _csrf: csrf,
-                snapshot: snapshot,
-                action: action,
+                snapshot: state,
+                action: method,
                 args: [],
             }),
             credentials: 'same-origin',
