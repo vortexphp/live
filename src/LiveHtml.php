@@ -28,9 +28,11 @@ final class LiveHtml
         if ($initialProps !== []) {
             $component->hydrate($initialProps);
         }
+        $component->mount();
 
-        $snapshot = Snapshot::encode($class, $component->dehydrate());
-        $inner = View::render($component->view(), $component->dataset());
+        $data = $component->dehydrate();
+        $snapshot = Snapshot::encode($class, $data);
+        $inner = self::renderView($component, $data);
 
         return self::wrap($inner, $snapshot);
     }
@@ -38,10 +40,23 @@ final class LiveHtml
     public static function renderAfterUpdate(Component $component): string
     {
         $class = $component::class;
-        $snapshot = Snapshot::encode($class, $component->dehydrate());
-        $inner = View::render($component->view(), $component->dataset());
+        $data = $component->dehydrate();
+        $snapshot = Snapshot::encode($class, $data);
+        $inner = self::renderView($component, $data);
 
         return self::wrap($inner, $snapshot);
+    }
+
+    /**
+     * @param array<string, mixed> $viewData
+     */
+    private static function renderView(Component $component, array $viewData): string
+    {
+        $component->render();
+        $html = View::render($component->view(), $viewData);
+        $component->rendered();
+
+        return $html;
     }
 
     public static function isAllowed(string $class): bool
