@@ -1,51 +1,74 @@
+/**
+ * vortexphp/live — client runtime (one file, no bundler).
+ * Product: Livewire-like POST + snapshot + actions; Alpine-like live:model.local, live-display,
+ * live:scope templates — see live/ROADMAP.md.
+ *
+ * Architecture (top → bottom):
+ *   SEL                    — attribute / selector constants
+ *   Controls               — read/write form controls, FormData → merge
+ *   Context                — [live-root], snapshot URL + CSRF
+ *   Binding meta           — live:model.* detection, merge from DOM
+ *   Validation UI          — live-error nodes
+ *   Local mirrors          — live-display text sync
+ *   Conditional visibility  — live:show / live:hide from bound prop truthiness
+ *   Scope templates        — live:scope + <template live:for-each>
+ *   Transport              — parseArgs, POST /live/message, replaceRoot
+ *   Model binders          — bindOneModel, initLiveBindings
+ *   Document events        — delegated click + submit
+ *   Boot                   — DOMContentLoaded
+ */
+
 (function () {
     'use strict';
 
-    /**
-     * Root [live-root]: live-state, live-url, live-csrf
-     * live:click, live:args | live:submit (merge via FormData + live:model.* fields)
-     * live:model.local — no auto POST; value ships on the next click/submit/sync from the DOM.
-     *   Pair with live-display="prop" on another node to mirror the current control value in the DOM as the user edits.
-     * live:model.live — debounced input → POST { sync:true, merge:{ prop: value } } (re-render, no action)
-     * live:model.lazy — change → sync when the control commits (e.g. textarea/input after edit)
-     * live-error="field" — validation_failed errors
-     */
-    var CLICK = '[live\\:click]';
-    var MODEL_SEL = '[live\\:model\\.local], [live\\:model\\.live], [live\\:model\\.lazy]';
+    // --- SEL -------------------------------------------------------------------
 
-    function applyLiveErrors(root, errors) {
-        var nodes = root.querySelectorAll('[live-error]');
-        for (var i = 0; i < nodes.length; i++) {
-            var el = nodes[i];
-            var field = el.getAttribute('live-error');
-            if (!field) {
-                el.textContent = '';
-                continue;
+    var SEL = {
+        CLICK: '[live\\:click]',
+        MODEL: '[live\\:model\\.local], [live\\:model\\.live], [live\\:model\\.lazy]',
+        SCOPE: '[live\\:scope]',
+        SHOW: '[live\\:show]',
+        HIDE: '[live\\:hide]',
+    };
+
+    var templateUid = 0;
+
+    // --- Controls -------------------------------------------------------------
+
+    function readControlValue(el) {
+        var tag = el.tagName;
+        if (tag === 'INPUT') {
+            var type = (el.type || '').toLowerCase();
+            if (type === 'checkbox') {
+                return !!el.checked;
             }
-            var msg = errors[field];
-            el.textContent = msg ? msg : '';
+            if (type === 'radio') {
+                return el.checked ? el.value : null;
+            }
+            return el.value;
         }
+        if (tag === 'TEXTAREA') {
+            return el.value;
+        }
+        if (tag === 'SELECT') {
+            return el.value;
+        }
+        return el.value != null ? String(el.value) : '';
     }
 
-    function initLiveBindings(root) {
-        if (!root || !root.querySelectorAll) {
-            return;
-        }
-        var nodes = root.querySelectorAll(MODEL_SEL);
-        for (var i = 0; i < nodes.length; i++) {
-            bindOneModel(root, nodes[i]);
-        }
+    function formDataToMerge(form) {
+        var fd = new FormData(form);
+        var merge = {};
+        fd.forEach(function (value, name) {
+            if (typeof File !== 'undefined' && value instanceof File) {
+                return;
+            }
+            merge[name] = typeof value === 'string' ? value : String(value);
+        });
+        return merge;
     }
 
-    function replaceRoot(root, html) {
-        var template = document.createElement('template');
-        template.innerHTML = html.trim();
-        var next = template.content.firstElementChild;
-        if (next && root.parentNode) {
-            root.parentNode.replaceChild(next, root);
-            initLiveBindings(next);
-        }
-    }
+    // --- Context --------------------------------------------------------------
 
     function readLiveContext(root) {
         return {
@@ -54,6 +77,8 @@
             csrf: root.getAttribute('live-csrf'),
         };
     }
+
+    // --- Binding meta ---------------------------------------------------------
 
     function getLiveModelBinding(el) {
         var loc = el.getAttribute('live:model.local');
@@ -70,6 +95,45 @@
         }
         return null;
     }
+
+    function mergeFromBoundInside(container) {
+        var nodes = container.querySelectorAll ? container.querySelectorAll(SEL.MODEL) : [];
+        var out = {};
+        for (var i = 0; i < nodes.length; i++) {
+            var b = getLiveModelBinding(nodes[i]);
+            if (!b) {
+                continue;
+            }
+            var v = readControlValue(nodes[i]);
+            if (v === null) {
+                continue;
+            }
+            out[b.prop] = v;
+        }
+        return out;
+    }
+
+    function mergeModelFieldsFromRoot(root, base) {
+        return Object.assign({}, mergeFromBoundInside(root), base || {});
+    }
+
+    // --- Validation UI --------------------------------------------------------
+
+    function applyLiveErrors(root, errors) {
+        var nodes = root.querySelectorAll('[live-error]');
+        for (var i = 0; i < nodes.length; i++) {
+            var el = nodes[i];
+            var field = el.getAttribute('live-error');
+            if (!field) {
+                el.textContent = '';
+                continue;
+            }
+            var msg = errors[field];
+            el.textContent = msg ? msg : '';
+        }
+    }
+
+    // --- Local mirrors (live-display) ----------------------------------------
 
     function formatLocalDisplayValue(v) {
         if (v === null || v === undefined) {
@@ -94,70 +158,276 @@
         }
     }
 
-    function readControlValue(el) {
-        var tag = el.tagName;
-        if (tag === 'INPUT') {
-            var type = (el.type || '').toLowerCase();
-            if (type === 'checkbox') {
-                return !!el.checked;
-            }
-            if (type === 'radio') {
-                return el.checked ? el.value : null;
-            }
-            return el.value;
+    function isLiveTruthy(raw) {
+        if (raw === null || raw === undefined) {
+            return false;
         }
-        if (tag === 'TEXTAREA') {
-            return el.value;
+        if (raw === false) {
+            return false;
         }
-        if (tag === 'SELECT') {
-            return el.value;
+        if (typeof raw === 'string' && raw.trim() === '') {
+            return false;
         }
-        return el.value != null ? String(el.value) : '';
+        if (typeof raw === 'number' && raw === 0) {
+            return false;
+        }
+        return true;
     }
 
-    function mergeFromBoundInside(container) {
-        var nodes = container.querySelectorAll ? container.querySelectorAll(MODEL_SEL) : [];
-        var out = {};
+    function syncLiveShowHideForProp(root, prop) {
+        if (!root || !prop) {
+            return;
+        }
+        var nodes = root.querySelectorAll(SEL.SHOW + ', ' + SEL.HIDE);
         for (var i = 0; i < nodes.length; i++) {
-            var b = getLiveModelBinding(nodes[i]);
-            if (!b) {
-                continue;
+            var el = nodes[i];
+            var sp = el.getAttribute('live:show');
+            var hp = el.getAttribute('live:hide');
+            if (sp === prop) {
+                var v = readLocalSingleProp(root, prop);
+                el.hidden = !isLiveTruthy(v);
             }
-            var v = readControlValue(nodes[i]);
-            if (v === null) {
-                continue;
+            if (hp === prop) {
+                var v2 = readLocalSingleProp(root, prop);
+                el.hidden = isLiveTruthy(v2);
             }
-            out[b.prop] = v;
+        }
+    }
+
+    function syncLiveShowHide(root) {
+        if (!root || !root.querySelectorAll) {
+            return;
+        }
+        var props = {};
+        var nodes = root.querySelectorAll(SEL.SHOW + ', ' + SEL.HIDE);
+        for (var i = 0; i < nodes.length; i++) {
+            var sp = nodes[i].getAttribute('live:show');
+            var hp = nodes[i].getAttribute('live:hide');
+            if (sp) {
+                props[sp] = true;
+            }
+            if (hp) {
+                props[hp] = true;
+            }
+        }
+        for (var p in props) {
+            if (Object.prototype.hasOwnProperty.call(props, p)) {
+                syncLiveShowHideForProp(root, p);
+            }
+        }
+    }
+
+    // --- Local read helpers (live:show / live:hide) ---------------------------
+
+    function queryLocalByProp(root, prop) {
+        var nodes = root.querySelectorAll('[live\\:model\\.local]');
+        var out = [];
+        for (var i = 0; i < nodes.length; i++) {
+            if (nodes[i].getAttribute('live:model.local') === prop) {
+                out.push(nodes[i]);
+            }
         }
         return out;
     }
 
-    function mergeModelFieldsFromRoot(root, base) {
-        return Object.assign({}, mergeFromBoundInside(root), base || {});
-    }
-
-    function formDataToMerge(form) {
-        var fd = new FormData(form);
-        var merge = {};
-        fd.forEach(function (value, name) {
-            if (typeof File !== 'undefined' && value instanceof File) {
-                return;
+    function readLocalSingleProp(root, prop) {
+        var nodes = queryLocalByProp(root, prop);
+        if (!nodes.length) {
+            return undefined;
+        }
+        var first = nodes[0];
+        var tag = first.tagName;
+        var type = (first.type || '').toLowerCase();
+        if (tag === 'INPUT' && type === 'radio') {
+            for (var i = 0; i < nodes.length; i++) {
+                if (nodes[i].checked) {
+                    return nodes[i].value;
+                }
             }
-            merge[name] = typeof value === 'string' ? value : String(value);
-        });
-        return merge;
+            return null;
+        }
+        return readControlValue(first);
     }
 
-    function parseArgs(actionEl) {
-        var raw = actionEl.getAttribute('live:args');
-        if (raw === null || raw === '') {
-            return [];
+    // --- Scope templates (live:scope) ------------------------------------------
+
+    function formatScopeValue(v) {
+        if (v === null || v === undefined) {
+            return '';
+        }
+        if (typeof v === 'object') {
+            try {
+                return JSON.stringify(v);
+            } catch (e) {
+                return String(v);
+            }
+        }
+        return String(v);
+    }
+
+    function fillScopeSlots(frag, key, value, index) {
+        var nodes = frag.querySelectorAll('[live\\:slot]');
+        for (var i = 0; i < nodes.length; i++) {
+            var slot = nodes[i].getAttribute('live:slot');
+            if (!slot) {
+                continue;
+            }
+            var text = '';
+            if (slot === 'value') {
+                text = formatScopeValue(value);
+            } else if (slot === 'key' || slot === 'name' || slot === 'label') {
+                text = String(key);
+            } else if (slot === 'index') {
+                text = String(index);
+            } else {
+                continue;
+            }
+            nodes[i].textContent = text;
+        }
+    }
+
+    function resolveScopePath(data, path) {
+        if (!data || typeof data !== 'object' || !path) {
+            return null;
+        }
+        var parts = path.split('.');
+        var cur = data;
+        for (var i = 0; i < parts.length; i++) {
+            if (cur == null || typeof cur !== 'object') {
+                return null;
+            }
+            cur = cur[parts[i]];
+        }
+        return cur;
+    }
+
+    function stripTemplateClones(template) {
+        var tid = template.getAttribute('data-live-template-id');
+        if (!tid) {
+            return;
+        }
+        var parent = template.parentNode;
+        if (!parent) {
+            return;
+        }
+        var n = template.nextSibling;
+        while (n) {
+            var next = n.nextSibling;
+            if (n.nodeType !== 1) {
+                n = next;
+                continue;
+            }
+            if (n.getAttribute('data-live-from-template') === tid) {
+                parent.removeChild(n);
+                n = next;
+                continue;
+            }
+            break;
+        }
+    }
+
+    function expandDataLiveForTemplate(template, scopeData) {
+        var path = template.getAttribute('live:for-each');
+        if (!path) {
+            return;
+        }
+        var obj = resolveScopePath(scopeData, path);
+        if (obj == null || typeof obj !== 'object') {
+            return;
+        }
+        var parent = template.parentNode;
+        if (!parent) {
+            return;
+        }
+        var tid = template.getAttribute('data-live-template-id');
+        if (!tid) {
+            tid = 'live-tpl-' + ++templateUid;
+            template.setAttribute('data-live-template-id', tid);
+        }
+        stripTemplateClones(template);
+
+        var last = template;
+        if (Array.isArray(obj)) {
+            for (var i = 0; i < obj.length; i++) {
+                var frag = document.importNode(template.content, true);
+                fillScopeSlots(frag, String(i), obj[i], i);
+                var ins = frag.firstElementChild;
+                if (ins) {
+                    ins.setAttribute('data-live-from-template', tid);
+                }
+                parent.insertBefore(frag, last.nextSibling);
+                last = frag.lastElementChild || last;
+            }
+        } else {
+            var keys = Object.keys(obj);
+            for (var j = 0; j < keys.length; j++) {
+                var k = keys[j];
+                var frag2 = document.importNode(template.content, true);
+                fillScopeSlots(frag2, k, obj[k], j);
+                var ins2 = frag2.firstElementChild;
+                if (ins2) {
+                    ins2.setAttribute('data-live-from-template', tid);
+                }
+                parent.insertBefore(frag2, last.nextSibling);
+                last = frag2.lastElementChild || last;
+            }
+        }
+    }
+
+    function readScopePayload(holder) {
+        var raw = holder.getAttribute('live:scope');
+        if (raw == null || String(raw).trim() === '') {
+            return null;
         }
         try {
-            var parsed = JSON.parse(raw);
-            return Array.isArray(parsed) ? parsed : null;
+            var data = JSON.parse(raw);
+            return data && typeof data === 'object' ? data : null;
         } catch (e) {
             return null;
+        }
+    }
+
+    function expandLiveScopesIn(container) {
+        if (!container || !container.querySelectorAll) {
+            return;
+        }
+        var holders = container.querySelectorAll(SEL.SCOPE);
+        for (var h = 0; h < holders.length; h++) {
+            var holder = holders[h];
+            var data = readScopePayload(holder);
+            if (!data) {
+                continue;
+            }
+            var templates = holder.querySelectorAll('template[live\\:for-each]');
+            for (var t = 0; t < templates.length; t++) {
+                expandDataLiveForTemplate(templates[t], data);
+            }
+        }
+    }
+
+    // --- Transport ------------------------------------------------------------
+
+    function parseArgs(actionEl) {
+        var liveRaw = actionEl.getAttribute('live:args');
+        if (liveRaw !== null && String(liveRaw).trim() !== '') {
+            try {
+                var parsed = JSON.parse(liveRaw);
+                return Array.isArray(parsed) ? parsed : null;
+            } catch (e) {
+                return null;
+            }
+        }
+        return [];
+    }
+
+    function replaceRoot(root, html) {
+        var template = document.createElement('template');
+        template.innerHTML = html.trim();
+        var next = template.content.firstElementChild;
+        if (next && root.parentNode) {
+            root.parentNode.replaceChild(next, root);
+            expandLiveScopesIn(next);
+            initLiveBindings(next);
         }
     }
 
@@ -219,6 +489,8 @@
             .catch(function () {});
     }
 
+    // --- Model binders ---------------------------------------------------------
+
     function bindOneModel(root, el) {
         if (el.getAttribute('data-live-model-bound') === '1') {
             return;
@@ -233,6 +505,7 @@
         if (binding.mode === 'local') {
             function pushLocalToDom() {
                 updateLocalDomDisplays(root, binding.prop, readControlValue(el));
+                syncLiveShowHideForProp(root, binding.prop);
             }
             var tagLoc = el.tagName;
             var typeLoc = (el.type || '').toLowerCase();
@@ -251,6 +524,9 @@
         if (binding.mode === 'live') {
             var debounceMs = 220;
             var timer = null;
+            function tickShowHide() {
+                syncLiveShowHideForProp(root, binding.prop);
+            }
             var syncField = function () {
                 var payload = {};
                 payload[binding.prop] = readControlValue(el);
@@ -259,11 +535,18 @@
             var tag = el.tagName;
             var type = (el.type || '').toLowerCase();
             if (tag === 'INPUT' && (type === 'checkbox' || type === 'radio')) {
-                el.addEventListener('change', syncField);
+                el.addEventListener('change', function () {
+                    tickShowHide();
+                    syncField();
+                });
             } else if (tag === 'SELECT') {
-                el.addEventListener('change', syncField);
+                el.addEventListener('change', function () {
+                    tickShowHide();
+                    syncField();
+                });
             } else {
                 el.addEventListener('input', function () {
+                    tickShowHide();
                     clearTimeout(timer);
                     timer = setTimeout(syncField, debounceMs);
                 });
@@ -273,6 +556,7 @@
 
         if (binding.mode === 'lazy') {
             var lazySync = function () {
+                syncLiveShowHideForProp(root, binding.prop);
                 var pl = {};
                 pl[binding.prop] = readControlValue(el);
                 if (pl[binding.prop] === null) {
@@ -292,12 +576,23 @@
         }
     }
 
-    document.addEventListener('click', function (event) {
+    function initLiveBindings(root) {
+        if (!root || !root.querySelectorAll) {
+            return;
+        }
+        var nodes = root.querySelectorAll(SEL.MODEL);
+        for (var i = 0; i < nodes.length; i++) {
+            bindOneModel(root, nodes[i]);
+        }
+        syncLiveShowHide(root);
+    }
+
+    function handleLiveDocumentClick(event) {
         var target = event.target;
         if (!target || !target.closest) {
             return;
         }
-        var actionEl = target.closest(CLICK);
+        var actionEl = target.closest(SEL.CLICK);
         if (!actionEl) {
             return;
         }
@@ -305,18 +600,16 @@
         if (!root) {
             return;
         }
-
         var method = actionEl.getAttribute('live:click');
         var args = parseArgs(actionEl);
         if (args === null) {
             return;
         }
-
         event.preventDefault();
         postLive(root, method, args, {});
-    });
+    }
 
-    document.addEventListener('submit', function (event) {
+    function handleLiveDocumentSubmit(event) {
         var form = event.target;
         if (!form || form.nodeName !== 'FORM' || !form.getAttribute) {
             return;
@@ -332,9 +625,13 @@
         event.preventDefault();
         var merge = Object.assign({}, mergeFromBoundInside(form), formDataToMerge(form));
         postLive(root, method, [], merge);
-    });
+    }
+
+    document.addEventListener('click', handleLiveDocumentClick);
+    document.addEventListener('submit', handleLiveDocumentSubmit);
 
     function boot() {
+        expandLiveScopesIn(document.body);
         var roots = document.querySelectorAll('[live-root]');
         for (var i = 0; i < roots.length; i++) {
             initLiveBindings(roots[i]);
