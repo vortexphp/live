@@ -6,17 +6,23 @@ For product direction and parity notes, see [ROADMAP.md](ROADMAP.md).
 
 ## Installation
 
-- Require the package; allowlist component FQCNs in app config (`live.components`).
-- Register the Twig extension (`live_mount`) in your app.
-- Expose the client script (copy `resources/live.js` to your web root or run your project’s sync step after `composer install`).
+- Require **`vortexphp/framework` ^0.12** and this package.
+- Allowlist component FQCNs in app config (`live.components`).
+- Register **`Vortex\Live\LivePackage`** in **`config/app.php`** under **`packages`** (it adds the `live_mount` Twig extension and `POST /live/message`).
+- Publish the client script: **`php vortex publish:assets`** (declared by **`LivePackage::publicAssets()`** → `public/js/live.js`). Run after **`composer install/update`**, or add a Composer script that calls it.
 
 **Config (example)**
 
 ```php
+// config/app.php (merge)
+'packages' => [
+    \Vortex\Live\LivePackage::class,
+],
+
 // config/live.php
 return [
     'components' => [
-        App\Live\Components\Counter::class,
+        \Vortex\vortex\app\Components\Live\Counter::class,
     ],
 ];
 ```
@@ -27,11 +33,9 @@ return [
 <script src="/js/live.js" defer></script>
 ```
 
-**Twig extension (your app wiring may differ)**
+(`publish:assets` places `resources/live.js` there.)
 
-```php
-$twig->addExtension(new \Vortex\Live\Twig\LiveExtension());
-```
+If you do not use application packages, register **`Vortex\Live\Twig\LiveExtension`** via **`app.twig_extensions`**, wire **`POST /live/message`** to **`LiveController::message`**, and copy **`resources/live.js`** into **`public/js/`** yourself.
 
 ## Component island (server-rendered root)
 
